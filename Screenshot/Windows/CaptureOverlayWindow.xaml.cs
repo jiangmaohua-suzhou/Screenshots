@@ -12,9 +12,14 @@ public partial class CaptureOverlayWindow : Window
 
     public Int32Rect? SelectedRegion { get; private set; }
 
-    public CaptureOverlayWindow()
+    public CaptureOverlayWindow(string? hintText = null)
     {
         InitializeComponent();
+
+        if (!string.IsNullOrWhiteSpace(hintText))
+        {
+            HintTextBlock.Text = hintText;
+        }
 
         Left = SystemParameters.VirtualScreenLeft;
         Top = SystemParameters.VirtualScreenTop;

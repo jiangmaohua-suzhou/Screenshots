@@ -7,14 +7,14 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Screenshot", "Screenshot\Sc
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|Any CPU = Debug|Any CPU
-		Release|Any CPU = Release|Any CPU
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}.Debug|x64.ActiveCfg = Debug|x64
+		{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}.Debug|x64.Build.0 = Debug|x64
+		{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}.Release|x64.ActiveCfg = Release|x64
+		{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

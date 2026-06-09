@@ -8,6 +8,8 @@ public class AppSettings
     public string SaveFolder { get; set; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
         "Screenshots");
+
+    public bool RecordSystemAudio { get; set; } = true;
 }
 
 public static class SettingsService
