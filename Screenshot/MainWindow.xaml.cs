@@ -1,7 +1,8 @@
 ﻿using System.Diagnostics;
-using System.Drawing;
 using System.IO;
 using System.Windows;
+using System.Windows.Media;
+using MaterialDesignThemes.Wpf;
 using Microsoft.Win32;
 using Screenshot.Services;
 using Screenshot.Windows;
@@ -10,38 +11,56 @@ namespace Screenshot;
 
 public partial class MainWindow : Window
 {
-    private AppSettings _settings;
+    private AppSettings _settings = new();
     private readonly ScreenRecordingService _recordingService = new();
+    private readonly CancellationTokenSource _windowCts = new();
+    private CancellationTokenSource? _operationCts;
     private RecordingIndicatorWindow? _recordingIndicator;
+    private bool _isApplyingSettings;
+    private int _isStoppingRecording;
 
     public MainWindow()
     {
-        _settings = SettingsService.Load();
         InitializeComponent();
-        SaveFolderTextBox.Text = _settings.SaveFolder;
-        RecordAudioCheckBox.IsChecked = _settings.RecordSystemAudio;
+        Loaded += MainWindow_Loaded;
+        Closed += (_, _) => _windowCts.Cancel();
+    }
+
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        _isApplyingSettings = true;
+        try
+        {
+            _settings = await SettingsService.LoadAsync(_windowCts.Token).ConfigureAwait(true);
+            SaveFolderTextBox.Text = _settings.SaveFolder;
+            RecordAudioCheckBox.IsChecked = _settings.RecordSystemAudio;
+        }
+        finally
+        {
+            _isApplyingSettings = false;
+        }
     }
 
     private void SaveFolderTextBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
-        if (!IsLoaded)
+        if (!IsLoaded || _isApplyingSettings)
         {
             return;
         }
 
         _settings.SaveFolder = SaveFolderTextBox.Text.Trim();
-        SettingsService.Save(_settings);
+        SettingsService.ScheduleSave(_settings);
     }
 
     private void RecordAudioCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        if (!IsLoaded)
+        if (!IsLoaded || _isApplyingSettings)
         {
             return;
         }
 
         _settings.RecordSystemAudio = RecordAudioCheckBox.IsChecked == true;
-        SettingsService.Save(_settings);
+        _ = SettingsService.SaveAsync(_settings);
     }
 
     private void BrowseFolder_Click(object sender, RoutedEventArgs e)
@@ -67,24 +86,29 @@ public partial class MainWindow : Window
             return;
         }
 
+        var operationToken = BeginOperation();
         SetActionButtonsEnabled(false);
-        StatusTextBlock.Text = "正在截取全屏...";
+        SetStatus("正在截取全屏...", StatusKind.Info);
 
         try
         {
-            Hide();
-            await Task.Delay(200);
-
-            using var bitmap = ScreenshotService.CaptureFullScreen();
-            var savedPath = ScreenshotService.SaveBitmap(bitmap, folder);
+            await PrepareForCaptureAsync().ConfigureAwait(true);
+            var savedPath = await ScreenshotService.CaptureAndSaveFullScreenAsync(
+                folder,
+                operationToken).ConfigureAwait(true);
             ShowSaveResult(savedPath, "截图已保存。");
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("截图已取消。", StatusKind.Warning);
         }
         catch (Exception ex)
         {
-            StatusTextBlock.Text = $"截图失败：{ex.Message}";
+            SetStatus($"截图失败：{ex.Message}", StatusKind.Error);
         }
         finally
         {
+            EndOperation();
             Show();
             Activate();
             SetActionButtonsEnabled(true);
@@ -98,13 +122,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        var operationToken = BeginOperation();
         SetActionButtonsEnabled(false);
-        StatusTextBlock.Text = "请拖动鼠标选择截图区域...";
+        SetStatus("请拖动鼠标选择截图区域...", StatusKind.Info);
 
         try
         {
-            Hide();
-            await Task.Delay(200);
+            await PrepareForCaptureAsync().ConfigureAwait(true);
 
             var overlay = new CaptureOverlayWindow("拖动鼠标选择截图区域，松开保存；Esc 取消");
             var selected = overlay.ShowDialog() == true && overlay.SelectedRegion.HasValue;
@@ -114,25 +138,31 @@ public partial class MainWindow : Window
 
             if (!selected || overlay.SelectedRegion is not { } region)
             {
-                StatusTextBlock.Text = "已取消区域截图。";
+                SetStatus("已取消区域截图。", StatusKind.Warning);
                 return;
             }
 
-            StatusTextBlock.Text = "正在保存截图...";
-            using var bitmap = ScreenshotService.CaptureRegion(
+            SetStatus("正在保存截图...", StatusKind.Info);
+            var savedPath = await ScreenshotService.CaptureAndSaveRegionAsync(
                 region.X,
                 region.Y,
                 region.Width,
-                region.Height);
-            var savedPath = ScreenshotService.SaveBitmap(bitmap, folder);
+                region.Height,
+                folder,
+                operationToken).ConfigureAwait(true);
             ShowSaveResult(savedPath, "截图已保存。");
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("截图已取消。", StatusKind.Warning);
         }
         catch (Exception ex)
         {
-            StatusTextBlock.Text = $"截图失败：{ex.Message}";
+            SetStatus($"截图失败：{ex.Message}", StatusKind.Error);
         }
         finally
         {
+            EndOperation();
             Show();
             Activate();
             SetActionButtonsEnabled(true);
@@ -146,7 +176,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        await StartRecordingAsync(folder, region: null);
+        await StartRecordingAsync(folder, region: null).ConfigureAwait(true);
     }
 
     private async void RegionRecordButton_Click(object sender, RoutedEventArgs e)
@@ -156,13 +186,13 @@ public partial class MainWindow : Window
             return;
         }
 
+        var operationToken = BeginOperation();
         SetActionButtonsEnabled(false);
-        StatusTextBlock.Text = "请拖动鼠标选择录屏区域...";
+        SetStatus("请拖动鼠标选择录屏区域...", StatusKind.Info);
 
         try
         {
-            Hide();
-            await Task.Delay(200);
+            await PrepareForCaptureAsync().ConfigureAwait(true);
 
             var overlay = new CaptureOverlayWindow("拖动鼠标选择录屏区域，松开后开始录制；Esc 取消");
             var selected = overlay.ShowDialog() == true && overlay.SelectedRegion.HasValue;
@@ -172,37 +202,61 @@ public partial class MainWindow : Window
 
             if (!selected || overlay.SelectedRegion is not { } region)
             {
-                StatusTextBlock.Text = "已取消区域录屏。";
+                SetStatus("已取消区域录屏。", StatusKind.Warning);
                 SetActionButtonsEnabled(true);
                 return;
             }
 
-            await StartRecordingAsync(folder, region);
+            await StartRecordingAsync(folder, region, operationToken).ConfigureAwait(true);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("录屏已取消。", StatusKind.Warning);
+            SetActionButtonsEnabled(true);
         }
         catch (Exception ex)
         {
-            StatusTextBlock.Text = $"录屏失败：{ex.Message}";
+            SetStatus($"录屏失败：{ex.Message}", StatusKind.Error);
             SetActionButtonsEnabled(true);
+        }
+        finally
+        {
+            EndOperation();
         }
     }
 
-    private Task StartRecordingAsync(string folder, Int32Rect? region)
+    private async Task StartRecordingAsync(
+        string folder,
+        Int32Rect? region,
+        CancellationToken cancellationToken = default)
     {
         SetActionButtonsEnabled(false);
 
         try
         {
-            var expectedPath = _recordingService.Start(folder, _settings.RecordSystemAudio, region);
+            var expectedPath = await _recordingService.StartAsync(
+                folder,
+                _settings.RecordSystemAudio,
+                (int)SystemParameters.VirtualScreenWidth,
+                (int)SystemParameters.VirtualScreenHeight,
+                region,
+                cancellationToken).ConfigureAwait(true);
+
             ShowRecordingUi(expectedPath);
-            StatusTextBlock.Text = region.HasValue ? "区域录屏已开始。" : "全屏录屏已开始。";
+            SetStatus(
+                region.HasValue ? "区域录屏已开始。" : "全屏录屏已开始。",
+                StatusKind.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            SetStatus("录屏已取消。", StatusKind.Warning);
+            SetActionButtonsEnabled(true);
         }
         catch (Exception ex)
         {
-            StatusTextBlock.Text = $"录屏失败：{ex.Message}";
+            SetStatus($"录屏失败：{ex.Message}", StatusKind.Error);
             SetActionButtonsEnabled(true);
         }
-
-        return Task.CompletedTask;
     }
 
     private void ShowRecordingUi(string expectedPath)
@@ -214,18 +268,17 @@ public partial class MainWindow : Window
         _recordingIndicator.Show();
 
         StopRecordButton.IsEnabled = true;
-        LastSavedTextBlock.Text = $"录制中：{expectedPath}";
-        StatusTextBlock.Text = "录屏进行中，点击“停止录屏”结束。";
+        SetStatus($"录屏进行中：{expectedPath}", StatusKind.Info);
     }
 
     private async void OnRecordingStopRequested(object? sender, EventArgs e)
     {
-        await StopRecordingAsync();
+        await StopRecordingAsync().ConfigureAwait(true);
     }
 
     private async void StopRecordButton_Click(object sender, RoutedEventArgs e)
     {
-        await StopRecordingAsync();
+        await StopRecordingAsync().ConfigureAwait(true);
     }
 
     private async Task StopRecordingAsync()
@@ -235,36 +288,48 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (Interlocked.CompareExchange(ref _isStoppingRecording, 1, 0) != 0)
+        {
+            return;
+        }
+
         SetRecordingControlsEnabled(false);
-        StatusTextBlock.Text = "正在保存录屏文件...";
+        SetStatus("正在保存录屏文件...", StatusKind.Info);
 
         try
         {
-            var result = await _recordingService.StopAsync();
-            CloseRecordingIndicator();
+            var result = await _recordingService.StopAsync(CancellationToken.None).ConfigureAwait(false);
 
-            WindowState = WindowState.Normal;
-            Activate();
+            await Dispatcher.InvokeAsync(() =>
+            {
+                CloseRecordingIndicator();
+                WindowState = WindowState.Normal;
+                Activate();
 
-            if (result.Success && !string.IsNullOrWhiteSpace(result.FilePath))
-            {
-                ShowSaveResult(result.FilePath, "录屏已保存。");
-            }
-            else
-            {
-                StatusTextBlock.Text = $"录屏失败：{result.Error ?? "未知错误"}";
-            }
+                if (result.Success && !string.IsNullOrWhiteSpace(result.FilePath))
+                {
+                    ShowSaveResult(result.FilePath, "录屏已保存。");
+                }
+                else
+                {
+                    SetStatus($"录屏失败：{result.Error ?? "未知错误"}", StatusKind.Error);
+                }
+            });
         }
         catch (Exception ex)
         {
-            CloseRecordingIndicator();
-            WindowState = WindowState.Normal;
-            Activate();
-            StatusTextBlock.Text = $"录屏失败：{ex.Message}";
+            await Dispatcher.InvokeAsync(() =>
+            {
+                CloseRecordingIndicator();
+                WindowState = WindowState.Normal;
+                Activate();
+                SetStatus($"录屏失败：{ex.Message}", StatusKind.Error);
+            });
         }
         finally
         {
-            SetActionButtonsEnabled(true);
+            Interlocked.Exchange(ref _isStoppingRecording, 0);
+            await Dispatcher.InvokeAsync(() => SetActionButtonsEnabled(true));
         }
     }
 
@@ -288,11 +353,14 @@ public partial class MainWindow : Window
             return;
         }
 
-        Directory.CreateDirectory(folder);
-        Process.Start(new ProcessStartInfo
+        _ = Task.Run(() =>
         {
-            FileName = folder,
-            UseShellExecute = true
+            Directory.CreateDirectory(folder);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = folder,
+                UseShellExecute = true
+            });
         });
     }
 
@@ -318,10 +386,96 @@ public partial class MainWindow : Window
         }
     }
 
+    private async Task PrepareForCaptureAsync()
+    {
+        Hide();
+        await Task.Delay(200, _windowCts.Token).ConfigureAwait(true);
+    }
+
+    private CancellationToken BeginOperation()
+    {
+        CancelOperation();
+        _operationCts = CancellationTokenSource.CreateLinkedTokenSource(_windowCts.Token);
+        return _operationCts.Token;
+    }
+
+    private void EndOperation()
+    {
+        if (_operationCts is null)
+        {
+            return;
+        }
+
+        _operationCts.Dispose();
+        _operationCts = null;
+    }
+
+    private void CancelOperation()
+    {
+        if (_operationCts is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!_operationCts.IsCancellationRequested)
+            {
+                _operationCts.Cancel();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already disposed by a completed operation.
+        }
+        finally
+        {
+            try
+            {
+                _operationCts.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already disposed.
+            }
+
+            _operationCts = null;
+        }
+    }
+
     private void ShowSaveResult(string savedPath, string statusMessage)
     {
-        LastSavedTextBlock.Text = savedPath;
-        StatusTextBlock.Text = statusMessage;
+        SetStatus($"{statusMessage} {savedPath}", StatusKind.Success);
+    }
+
+    private void SetStatus(string message, StatusKind kind)
+    {
+        StatusTextBlock.Text = message;
+        StatusPanel.Visibility = string.IsNullOrWhiteSpace(message)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+        StatusIcon.Kind = kind switch
+        {
+            StatusKind.Success => PackIconKind.CheckCircle,
+            StatusKind.Warning => PackIconKind.AlertCircle,
+            StatusKind.Error => PackIconKind.CloseCircle,
+            _ => PackIconKind.Information
+        };
+
+        StatusIcon.Foreground = kind switch
+        {
+            StatusKind.Success => GetThemeBrush("MaterialDesign.Brush.Secondary"),
+            StatusKind.Warning => new SolidColorBrush(System.Windows.Media.Color.FromRgb(245, 158, 11)),
+            StatusKind.Error => GetThemeBrush("MaterialDesign.Brush.ValidationError"),
+            _ => GetThemeBrush("MaterialDesign.Brush.Primary")
+        };
+    }
+
+    private System.Windows.Media.Brush GetThemeBrush(string resourceKey)
+    {
+        return TryFindResource(resourceKey) as System.Windows.Media.Brush
+            ?? System.Windows.Media.Brushes.Gray;
     }
 
     private void SetActionButtonsEnabled(bool enabled)
@@ -334,6 +488,7 @@ public partial class MainWindow : Window
         StopRecordButton.IsEnabled = recording;
         SaveFolderTextBox.IsEnabled = enabled && !recording;
         RecordAudioCheckBox.IsEnabled = enabled && !recording;
+        OpenFolderButton.IsEnabled = enabled && !recording;
     }
 
     private void SetRecordingControlsEnabled(bool enabled)
@@ -345,27 +500,57 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    private void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        if (!_recordingService.IsRecording)
+        if (_recordingService.IsRecording)
         {
-            _recordingService.Dispose();
-            return;
-        }
+            var result = MessageBox.Show(
+                "录屏仍在进行中，确定要停止录屏并退出吗？",
+                "确认退出",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
 
-        var result = MessageBox.Show(
-            "录屏仍在进行中，确定要停止录屏并退出吗？",
-            "确认退出",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Question);
+            if (result != MessageBoxResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
 
-        if (result != MessageBoxResult.Yes)
-        {
             e.Cancel = true;
+            _ = StopRecordingAndCloseAsync();
             return;
         }
 
-        await StopRecordingAsync();
+        CancelOperation();
+        _windowCts.Cancel();
         _recordingService.Dispose();
+        _windowCts.Dispose();
+    }
+
+    private async Task StopRecordingAndCloseAsync()
+    {
+        try
+        {
+            await StopRecordingAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            await Dispatcher.InvokeAsync(() =>
+            {
+                CancelOperation();
+                _windowCts.Cancel();
+                _recordingService.Dispose();
+                _windowCts.Dispose();
+                Close();
+            });
+        }
+    }
+
+    private enum StatusKind
+    {
+        Info,
+        Success,
+        Warning,
+        Error
     }
 }

@@ -13,46 +13,90 @@ public sealed class RecordingResult
 
 public sealed class ScreenRecordingService : IDisposable
 {
+    private readonly object _sync = new();
     private Recorder? _recorder;
     private TaskCompletionSource<RecordingResult>? _completionSource;
 
     public bool IsRecording { get; private set; }
 
-    public string Start(string outputFolder, bool includeAudio, Int32Rect? region = null)
+    public Task<string> StartAsync(
+        string outputFolder,
+        bool includeAudio,
+        int virtualScreenWidth,
+        int virtualScreenHeight,
+        Int32Rect? region = null,
+        CancellationToken cancellationToken = default)
     {
-        if (IsRecording)
+        cancellationToken.ThrowIfCancellationRequested();
+
+        lock (_sync)
         {
-            throw new InvalidOperationException("已有录屏任务正在进行。");
+            if (IsRecording)
+            {
+                throw new InvalidOperationException("已有录屏任务正在进行。");
+            }
+
+            Directory.CreateDirectory(outputFolder);
+            var outputPath = Path.Combine(outputFolder, $"Recording_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
+            var options = BuildOptions(includeAudio, region, virtualScreenWidth, virtualScreenHeight);
+
+            _recorder = Recorder.CreateRecorder(options);
+            _completionSource = new TaskCompletionSource<RecordingResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
+            _recorder.OnRecordingComplete += OnRecordingComplete;
+            _recorder.OnRecordingFailed += OnRecordingFailed;
+
+            IsRecording = true;
+            _recorder.Record(outputPath);
+
+            return Task.FromResult(outputPath);
         }
-
-        Directory.CreateDirectory(outputFolder);
-        var outputPath = Path.Combine(outputFolder, $"Recording_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
-        var options = BuildOptions(includeAudio, region);
-
-        _recorder = Recorder.CreateRecorder(options);
-        _completionSource = new TaskCompletionSource<RecordingResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        _recorder.OnRecordingComplete += OnRecordingComplete;
-        _recorder.OnRecordingFailed += OnRecordingFailed;
-
-        IsRecording = true;
-        _recorder.Record(outputPath);
-        return outputPath;
     }
 
-    public Task<RecordingResult> StopAsync()
+    public async Task<RecordingResult> StopAsync(CancellationToken cancellationToken = default)
     {
-        if (_recorder is null || !IsRecording)
+        Recorder? recorder;
+        Task<RecordingResult> completionTask;
+
+        lock (_sync)
         {
-            return Task.FromResult(new RecordingResult
+            if (_recorder is null || !IsRecording)
             {
-                Success = false,
-                Error = "当前没有进行中的录屏。"
-            });
+                return new RecordingResult
+                {
+                    Success = false,
+                    Error = "当前没有进行中的录屏。"
+                };
+            }
+
+            recorder = _recorder;
+            completionTask = _completionSource!.Task;
         }
 
-        _recorder.Stop();
-        return _completionSource!.Task;
+        try
+        {
+            await Task.Run(recorder.Stop, cancellationToken).ConfigureAwait(false);
+
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromMinutes(2));
+            return await completionTask.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new RecordingResult
+            {
+                Success = false,
+                Error = "等待录屏结束超时。"
+            };
+        }
+        finally
+        {
+            lock (_sync)
+            {
+                CleanupRecorder();
+            }
+        }
     }
 
     private void OnRecordingComplete(object? sender, RecordingCompleteEventArgs e)
@@ -75,9 +119,11 @@ public sealed class ScreenRecordingService : IDisposable
 
     private void Finish(RecordingResult result)
     {
-        IsRecording = false;
-        _completionSource?.TrySetResult(result);
-        CleanupRecorder();
+        lock (_sync)
+        {
+            IsRecording = false;
+            _completionSource?.TrySetResult(result);
+        }
     }
 
     private void CleanupRecorder()
@@ -94,7 +140,11 @@ public sealed class ScreenRecordingService : IDisposable
         _completionSource = null;
     }
 
-    private static RecorderOptions BuildOptions(bool includeAudio, Int32Rect? region)
+    private static RecorderOptions BuildOptions(
+        bool includeAudio,
+        Int32Rect? region,
+        int virtualScreenWidth,
+        int virtualScreenHeight)
     {
         var sources = Recorder.GetDisplays().Cast<RecordingSourceBase>().ToList();
         if (sources.Count == 0)
@@ -121,9 +171,9 @@ public sealed class ScreenRecordingService : IDisposable
         }
         else
         {
-            var width = MakeEven((int)SystemParameters.VirtualScreenWidth);
-            var height = MakeEven((int)SystemParameters.VirtualScreenHeight);
-            outputOptions.OutputFrameSize = new ScreenSize(width, height);
+            outputOptions.OutputFrameSize = new ScreenSize(
+                MakeEven(virtualScreenWidth),
+                MakeEven(virtualScreenHeight));
         }
 
         return new RecorderOptions
@@ -165,11 +215,14 @@ public sealed class ScreenRecordingService : IDisposable
 
     public void Dispose()
     {
-        if (IsRecording)
+        lock (_sync)
         {
-            _recorder?.Stop();
-        }
+            if (IsRecording)
+            {
+                _recorder?.Stop();
+            }
 
-        CleanupRecorder();
+            CleanupRecorder();
+        }
     }
 }
