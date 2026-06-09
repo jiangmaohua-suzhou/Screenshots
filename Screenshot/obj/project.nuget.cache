@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "Fomhx33xmAw=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\Chris_jiang\\source\\repos\\Screenshot\\Screenshot\\Screenshot.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\Chris_jiang\\.nuget\\packages\\microsoft.win32.systemevents\\8.0.0\\microsoft.win32.systemevents.8.0.0.nupkg.sha512",
+    "C:\\Users\\Chris_jiang\\.nuget\\packages\\system.drawing.common\\8.0.11\\system.drawing.common.8.0.11.nupkg.sha512"
+  ],
+  "logs": []
+}

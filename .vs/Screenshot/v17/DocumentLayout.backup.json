@@ -1,0 +1,41 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\Chris_jiang\\source\\repos\\Screenshot\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}|Screenshot\\Screenshot.csproj|c:\\users\\chris_jiang\\source\\repos\\screenshot\\screenshot\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{8BC1B3DF-B3A3-4C86-AD8C-9C4A43042F21}|Screenshot\\Screenshot.csproj|solutionrelative:screenshot\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 1,
+          "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:128:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "MainWindow.xaml.cs",
+              "DocumentMoniker": "C:\\Users\\Chris_jiang\\source\\repos\\Screenshot\\Screenshot\\MainWindow.xaml.cs",
+              "RelativeDocumentMoniker": "Screenshot\\MainWindow.xaml.cs",
+              "ToolTip": "C:\\Users\\Chris_jiang\\source\\repos\\Screenshot\\Screenshot\\MainWindow.xaml.cs",
+              "RelativeToolTip": "Screenshot\\MainWindow.xaml.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-06-09T01:07:25.659Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
